@@ -1,0 +1,73 @@
+32 Gb = 4 GB over 4 seconds
+	Split over 4 OFCs+PCs pairs is 256 MB/s per pair (2 Gb/s)
+1.6 Mb/event = 256 KB/event
+
+Data must be both written to disks and read again
+	=> disks must support twice the incoming data rate in mixed reads
+	reads should be sequential in 256 KB chunks, hopefully writes will be as well
+	need to support 512 MB/s of mixed sequential reads and writes per PC
+
+SATA SSDs seem to support ~400 MB/s for similar workloads
+	https://www.anandtech.com/show/12348/the-samsung-860-pro-512gb-and-4tb-ssd-review/7
+	'Mixed Sequential Performance' section
+	=> striping across two SATA SSDs should be sufficient
+		a pair of 2 TB drives would give a buffer size of >2 hours
+
+----
+
+Divide Events into Chunks which are small enough to fit in an Ethernet frame
+Need some Network input threads (NITs), and some disk output threads (DOTs)
+A substantial, fixed number of Events should be preallocated, and only pointers/references should be passed around
+There should be a pool of 'blank' events which the NITs can fill with data
+	Blank Event Pool == BEP
+	It is an error if the blank event pool is ever empty when a NIT needs to allocate an event to fill, but cannot halt
+Cannot know which NIT will get a given event, so NITs must fill Events cooperatively
+	If no packet duplication is assumed, each Event only needs to track the number of chunks written to it to determine completeness
+	If packet duplication must be tolerated, each Event may need to hold a bitmap of ready chunks
+When a NIT gets a chunk, it must determine the Event to which it belongs
+	Keep a concurrent map of EventID->EventRef, the Incoming Event Map (IEM)
+	If the Event is found in the IEM, the NIT must obtain one from the BEP and add it to the IEM
+	If the NIT adds a chunk to the Event and the Event becomes complete, it should
+		Remove the Event from the IEM
+		Insert the event into a queue of complete events which are ready to output
+			The Ready To Write Queue == RTWQ
+Each DOT takes Events from the RTWQ and writes them to disk
+	When an event is fully written, the DOT erases (resets) it and places it in the BEP
+
+Need to clean up partial events which will never complete (dealing with dropped packets)
+	Assume some timeout: If an event has not arrived in full after one second, abandon it
+	Have an In-Progress Event Queue (IPEQ) which holds EventID,timeout pairs
+	When a DIT allocates an Event, it adds it to the IPEQ with a timeout suitably in the future
+	Have a separate Incomplete Event Reaper Thread (IERT)
+	The IERT takes items from the IPEQ:	
+		For each item held by the IERT, it waits until the timeout passes
+		If the corresponding Event is still in the IEM, it is removed, and returned to the BEP
+		Otherwise, the timeout entry is discarded
+Dealing with duplicated packets is hard:
+	If packet duplication must be tolerated, each Event may need to hold a bitmap of ready chunks
+	Even then, how to address a duplicate chunk arriving after its Event is complete and has been moved to the RTWQ?
+		Simplistically, this will cause a new Event to be allocated, which will probably never be completed
+			Perhaps this can just be left to the IERT
+
+Can extend design to sending events to external processing:
+	Add Network Output Threads (NOTs) and a Ready To Transmit Queue
+	Intead of resetting Events and returning them to the BEP, the DOTs would place them into the RTTQ to go to the NOTs
+	NOTs would then be responsible for returning Events to the BEP
+Can recover cached events from disk:
+	Add Disk Input Threads (DITs)
+	Start DITs only if existing data is found on disk
+	DITs also draw from BEP, but then place Events directly into the RTTQ
+
+
+
+                +-----+
+                | BEP | <--------------------------------------------+
+                +-----+                                              |
+                   |                     +-----+                     |
+                   +-------------------> | DIT | -------+            |
+                   |                     +-----+        |            |
+                   v                                    v            |
++---------+     +-----+     +------+     +-----+     +------+     +-----+
+| Network | --> | NIT | --> | RTWQ | --> | DOT | --> | RTTQ | --> | NOT |
++---------+     +-----+     +------+     +-----+     +------+     +-----+
+
