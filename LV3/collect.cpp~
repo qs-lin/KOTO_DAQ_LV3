@@ -1,0 +1,66 @@
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <deque>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <queue>
+#include <thread>
+
+#include <sys/stat.h>
+#include <signal.h>
+
+#include "blockingconcurrentqueue.h"
+#include "libcuckoo/cuckoohash_map.hh"
+
+#include "event.h"
+#include "udp_sockets.h"
+
+int main(){
+
+  //UDP::NetworkOutputSocket socket{"0.0.0.0",std::to_string(basePort)};
+  int basePort = 42000;
+  //UDP::NetworkInputSocket inputsocket{"0.0.0.0",std::to_string(basePort)};
+  UDP::NetworkInputSocket inputSocket(basePort);
+  
+  Chunk data;
+
+  ssize_t dataLen;
+  while(true){
+  //attempt to get a packet
+    dataLen=recvfrom(inputSocket.socket_fd, &data, sizeof(data),
+            //Qisen
+            //dataLen=recvfrom(inputSocket.socket_fd, &packet, 2000,
+    /*flags*/ 0,
+    /*don't care about source adddress*/ nullptr, 0);
+    if(dataLen==-1){
+      int err=errno;
+      if(err==EAGAIN)
+        continue;
+      if(err==EWOULDBLOCK) //will happen periodically due to SO_RCVTIMEO
+        continue;
+      perror("recvfrom() failed");
+      throw std::runtime_error("recvfrom() failed");
+    }else{
+      std::cout << dataLen << std::endl;
+      std::cout << data[0] << std::endl;
+      std::cout << data[1] << std::endl;
+      std::cout << data[2] << std::endl;
+      std::cout << data[3] << std::endl;
+	  break;
+    }
+
+
+  }
+
+
+
+
+
+
+
+
+  return 0;
+
+}

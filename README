@@ -1,0 +1,11 @@
+LV3:
+  the Level3 system of KOTO DAQ: 
+    Will auto detect the end-spill info from LV2. 
+    Use the real event structure (defined in LV2) 
+    
+rate_test:
+  the prototype of LV3. Event structure is defined for testing purpose.
+  the rate test study: adjust the number of ports, reading & writing threads.
+
+Multithreading:
+  tutorials for multithreading in c++  
